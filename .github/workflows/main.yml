@@ -25,5 +25,5 @@ jobs:
         subscriptionId: ${{ secrets.AZURE_SUBSCRIPTION }}
         resourceGroupName: 'rg-deploymenttest'
         template: ./main.bicep
-        parameters: 'location=uksouth resourceGroupName=rg-deploymenttest storagePrefix=mystore storageSKU=Standard_LRS'
+        parameters: 'keyVaultName=kv-deploymenttestkeyvault objectId={ secrets.AZURE_CLIENT_ID }'
         failOnStdErr: false
