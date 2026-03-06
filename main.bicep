@@ -41,11 +41,11 @@ param secretsPermissions array = [
 param skuName string = 'standard'
 
 @description('Specifies the name of the secret that you want to create.')
-param secretName string
+param secretName string = 'myTestSecret'
 
 @description('Specifies the value of the secret that you want to create.')
 @secure()
-param secretValue string
+param secretValue string = newGuid()
 
 resource kv 'Microsoft.KeyVault/vaults@2023-07-01' = {
   name: keyVaultName
