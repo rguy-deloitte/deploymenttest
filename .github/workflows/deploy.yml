@@ -6,7 +6,6 @@ on:
   workflow_dispatch:
 
 permissions:
-  id-token: write
   contents: read
 
 env:
@@ -24,9 +23,7 @@ jobs:
       - name: Azure Login
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
 
       - name: Validate Bicep
         run: az bicep build --file main.bicep
@@ -37,31 +34,22 @@ jobs:
           az deployment group what-if \
             --resource-group ${{ env.RESOURCE_GROUP }} \
             --template-file main.bicep \
-            --parameters keyVaultName=${{ env.KEY_VAULT_NAME }} objectId=$(az ad signed-in-user show --query id -o tsv 2>/dev/null || echo "00000000-0000-0000-0000-000000000000")
+            --parameters keyVaultName=${{ env.KEY_VAULT_NAME }} objectId=dab21f06-0c5d-4442-bbba-0d0a77d6eac8
 
   deploy:
     name: Deploy
     needs: build
     runs-on: ubuntu-latest
-    environment: production
     steps:
       - uses: actions/checkout@v4
 
       - name: Azure Login
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
 
       - name: Ensure Resource Group
         run: az group create --name ${{ env.RESOURCE_GROUP }} --location ${{ env.LOCATION }}
-
-      - name: Get Service Principal Object ID
-        id: sp
-        run: |
-          SP_OBJECT_ID=$(az ad sp show --id ${{ secrets.AZURE_CLIENT_ID }} --query id -o tsv)
-          echo "object_id=$SP_OBJECT_ID" >> "$GITHUB_OUTPUT"
 
       - name: Deploy Bicep
         id: deployment
@@ -69,7 +57,7 @@ jobs:
           az deployment group create \
             --resource-group ${{ env.RESOURCE_GROUP }} \
             --template-file main.bicep \
-            --parameters keyVaultName=${{ env.KEY_VAULT_NAME }} objectId=${{ steps.sp.outputs.object_id }} \
+            --parameters keyVaultName=${{ env.KEY_VAULT_NAME }} objectId=dab21f06-0c5d-4442-bbba-0d0a77d6eac8 \
             --name "deploy-${{ github.run_number }}"
 
   smoke-test:
@@ -80,9 +68,7 @@ jobs:
       - name: Azure Login
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
 
       - name: Verify Key Vault exists
         run: |
