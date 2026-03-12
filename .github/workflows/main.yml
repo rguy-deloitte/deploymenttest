@@ -1,7 +1,6 @@
 on: [push]
 name: Azure ARM
 permissions:
-  id-token: write
   contents: read
 jobs:
   build-and-deploy:
@@ -11,12 +10,13 @@ jobs:
       # Checkout code
     - uses: actions/checkout@main
 
-      # Log into Azure
+      # Log into Azure using client secret (supports all branches)
     - uses: azure/login@v2
       with:
         client-id: ${{ secrets.AZURE_CLIENT_ID }}
         tenant-id: ${{ secrets.AZURE_TENANT_ID }}
         subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
 
       # Deploy Bicep file
     - name: deploy
