@@ -1,0 +1,128 @@
+name: Deploy Key Vault to Azure
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  RESOURCE_GROUP: rg-deploymenttest
+  LOCATION: uksouth
+  KEY_VAULT_NAME: kv-deploytest-${{ github.run_number }}
+
+jobs:
+  build:
+    name: Build & Validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Validate Bicep
+        run: az bicep build --file main.bicep
+
+      - name: What-If Deployment
+        run: |
+          az group create --name ${{ env.RESOURCE_GROUP }} --location ${{ env.LOCATION }} || true
+          az deployment group what-if \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --template-file main.bicep \
+            --parameters keyVaultName=${{ env.KEY_VAULT_NAME }} objectId=$(az ad signed-in-user show --query id -o tsv 2>/dev/null || echo "00000000-0000-0000-0000-000000000000")
+
+  deploy:
+    name: Deploy
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Ensure Resource Group
+        run: az group create --name ${{ env.RESOURCE_GROUP }} --location ${{ env.LOCATION }}
+
+      - name: Get Service Principal Object ID
+        id: sp
+        run: |
+          SP_OBJECT_ID=$(az ad sp show --id ${{ secrets.AZURE_CLIENT_ID }} --query id -o tsv)
+          echo "object_id=$SP_OBJECT_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy Bicep
+        id: deployment
+        run: |
+          az deployment group create \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --template-file main.bicep \
+            --parameters keyVaultName=${{ env.KEY_VAULT_NAME }} objectId=${{ steps.sp.outputs.object_id }} \
+            --name "deploy-${{ github.run_number }}"
+
+  smoke-test:
+    name: Smoke Test
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Verify Key Vault exists
+        run: |
+          echo "=== Smoke Test: Verifying Key Vault deployment ==="
+          KV_NAME=${{ env.KEY_VAULT_NAME }}
+          RG=${{ env.RESOURCE_GROUP }}
+
+          echo "1. Checking Key Vault resource exists..."
+          az keyvault show --name "$KV_NAME" --resource-group "$RG" --query "{name:name, location:location, provisioningState:properties.provisioningState}" -o table
+          echo "✅ Key Vault exists"
+
+          echo ""
+          echo "2. Checking Key Vault SKU..."
+          SKU=$(az keyvault show --name "$KV_NAME" --resource-group "$RG" --query "properties.sku.name" -o tsv)
+          if [ "$SKU" = "standard" ]; then
+            echo "✅ SKU is 'standard' as expected"
+          else
+            echo "❌ SKU mismatch: expected 'standard', got '$SKU'"
+            exit 1
+          fi
+
+          echo ""
+          echo "3. Checking soft delete is enabled..."
+          SOFT_DELETE=$(az keyvault show --name "$KV_NAME" --resource-group "$RG" --query "properties.enableSoftDelete" -o tsv)
+          if [ "$SOFT_DELETE" = "true" ]; then
+            echo "✅ Soft delete is enabled"
+          else
+            echo "❌ Soft delete is NOT enabled"
+            exit 1
+          fi
+
+          echo ""
+          echo "4. Checking secret 'myTestSecret' exists..."
+          az keyvault secret show --vault-name "$KV_NAME" --name "myTestSecret" --query "{name:name, enabled:attributes.enabled}" -o table
+          echo "✅ Secret 'myTestSecret' exists"
+
+          echo ""
+          echo "5. Checking deployment record..."
+          az deployment group show --resource-group "$RG" --name "deploy-${{ github.run_number }}" --query "{name:name, provisioningState:properties.provisioningState}" -o table
+          echo "✅ Deployment completed successfully"
+
+          echo ""
+          echo "=== All smoke tests passed ==="
