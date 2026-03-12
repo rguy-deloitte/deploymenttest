@@ -27,3 +27,50 @@ jobs:
         template: ./main.bicep
         parameters: 'keyVaultName=kv-dtest objectId=${{ secrets.AZURE_CLIENT_ID }}'
         failOnStdErr: false
+
+      # Smoke test: validate the Key Vault was deployed successfully
+    - name: smoke-test
+      uses: azure/cli@v2
+      with:
+        azcliversion: 2.67.0
+        inlineScript: |
+          set -e
+          VAULT_NAME="kv-dtest"
+          RESOURCE_GROUP="rg-deploymenttest"
+
+          echo "=== Smoke Test: Validating Azure Key Vault deployment ==="
+
+          # Check that the Key Vault exists
+          echo "Checking Key Vault exists..."
+          az keyvault show \
+            --name "$VAULT_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --query "{name:name, location:location, provisioningState:properties.provisioningState, vaultUri:properties.vaultUri}" \
+            --output json
+
+          # Verify provisioning state is Succeeded
+          PROVISIONING_STATE=$(az keyvault show \
+            --name "$VAULT_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --query "properties.provisioningState" \
+            --output tsv)
+
+          echo "Provisioning state: $PROVISIONING_STATE"
+          if [ "$PROVISIONING_STATE" != "Succeeded" ]; then
+            echo "ERROR: Key Vault provisioning state is '$PROVISIONING_STATE', expected 'Succeeded'"
+            exit 1
+          fi
+
+          # Verify the secret was created
+          echo "Checking secret 'myTestSecret' exists in Key Vault..."
+          SECRET_EXISTS=$(az keyvault secret list \
+            --vault-name "$VAULT_NAME" \
+            --query "[?name=='myTestSecret'].name" \
+            --output tsv)
+
+          if [ -z "$SECRET_EXISTS" ]; then
+            echo "ERROR: Secret 'myTestSecret' not found in Key Vault '$VAULT_NAME'"
+            exit 1
+          fi
+
+          echo "=== Smoke Test PASSED: Key Vault '$VAULT_NAME' deployed and validated successfully ==="
